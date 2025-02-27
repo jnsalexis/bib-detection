@@ -6,7 +6,7 @@ from ultralytics import YOLO
 # Charger le modèle YOLO
 model = YOLO("best.pt")
 
-# Créez un dossier pour enregistrer les images si ce n'est pas déjà fait
+# Créer un dossier pour enregistrer les images si ce n'est pas déjà fait
 output_folder = "croppedimg"
 os.makedirs(output_folder, exist_ok=True)
 
@@ -38,18 +38,14 @@ def process_frame(frame):
 
                     # Convertir en niveaux de gris
                     binary = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
-                    # Appliquer le seuillage adaptatif
-                    binary = cv2.adaptiveThreshold(binary, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                                   cv2.THRESH_BINARY, 19, 6)
 
                     # Enregistrer l'image prétraitée dans le dossier
-
                     filename = f"{output_folder}/dossard_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.jpg"
                     cv2.imwrite(filename, binary)
                     print(f"Image enregistrée : {filename}")
 
 def process_webcam():
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(1)
 
     while cap.isOpened():
         ret, frame = cap.read()
