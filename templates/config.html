@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InLine - Configuration</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-logo">
+                <img src="/static/img/logo.png" alt="InLine Logo">
+                <h1>Configuration de la détection</h1>
+            </div>
+            <a href="/" class="btn btn-secondary">Retour</a>
+        </div>
+        
+        {% if request.query_params.get('success') %}
+        <div class="success-message">
+            Configuration mise à jour avec succès. Redémarrez les scripts pour appliquer les changements.
+        </div>
+        {% endif %}
+        
+        {% if request.query_params.get('error') %}
+        <div class="error-message">
+            Erreur lors de la sauvegarde de la configuration.
+        </div>
+        {% endif %}
+        
+        <form method="POST" action="/config/update">
+            <!-- Paramètres de détection YOLO -->
+            <div class="card">
+                <h2>Paramètres de détection YOLO</h2>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="confidence_threshold">Confidence Threshold *</label>
+                        <input type="number" id="confidence_threshold" name="confidence_threshold" 
+                               value="{{ config.detection.confidence_threshold }}" 
+                               step="0.01" min="0" max="1" required>
+                        <small>Seuil de confiance pour les détections YOLO (0.0 - 1.0). Valeur par défaut: 0.3</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="min_box_area">Min Box Area (pixels) *</label>
+                        <input type="number" id="min_box_area" name="min_box_area" 
+                               value="{{ config.detection.min_box_area }}" 
+                               min="0" required>
+                        <small>Aire minimale de la bounding box en pixels. Valeur par défaut: 1000</small>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="model_resolution">Model Resolution (px) *</label>
+                        <input type="number" id="model_resolution" name="model_resolution" 
+                               value="{{ config.detection.model_resolution }}" 
+                               min="320" step="160" required>
+                        <small>Résolution du modèle YOLO. Valeur par défaut: 1280</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="required_detections">Required Detections *</label>
+                        <input type="number" id="required_detections" name="required_detections" 
+                               value="{{ config.detection.required_detections }}" 
+                               min="1" required>
+                        <small>Nombre de détections requises avant envoi à Supabase. Valeur par défaut: 3</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Paramètres OCR -->
+            <div class="card">
+                <h2>Paramètres OCR</h2>
+                
+                <div class="form-group">
+                    <label for="min_height">Min Height (pixels) *</label>
+                    <input type="number" id="min_height" name="min_height" 
+                           value="{{ config.ocr.min_height }}" 
+                           min="0" required>
+                    <small>Taille minimale (hauteur) pour que Tesseract lise bien les chiffres. Valeur par défaut: 400</small>
+                </div>
+            </div>
+            
+            <!-- Paramètres RTSP -->
+            <div class="card">
+                <h2>Paramètres RTSP</h2>
+                
+                <div class="form-group">
+                    <label for="rtsp_url">RTSP URL *</label>
+                    <input type="text" id="rtsp_url" name="rtsp_url" 
+                           value="{{ config.rtsp.url }}" required>
+                    <small>URL du flux RTSP pour la détection en temps réel</small>
+                </div>
+            </div>
+            
+            <!-- Paramètres des dossiers -->
+            <div class="card">
+                <h2>Paramètres des dossiers</h2>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="output_folder">Output Folder *</label>
+                        <input type="text" id="output_folder" name="output_folder" 
+                               value="{{ config.folders.output_folder }}" required>
+                        <small>Dossier de sortie pour les images de dossards détectés</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="processed_folder">Processed Folder *</label>
+                        <input type="text" id="processed_folder" name="processed_folder" 
+                               value="{{ config.folders.processed_folder }}" required>
+                        <small>Dossier pour les images préprocessées</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="info-box">
+                    <h3>Note importante</h3>
+                    <p>Après avoir modifié ces paramètres, vous devez redémarrer les scripts <code>stream.py</code> et <code>process_images.py</code> pour que les changements prennent effet.</p>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Enregistrer la configuration</button>
+                    <a href="/" class="btn btn-secondary">Annuler</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</body>
+</html>

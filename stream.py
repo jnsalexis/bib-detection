@@ -2,24 +2,77 @@ import os
 import time
 import threading
 import cv2
+import json
 from datetime import datetime
+from collections import defaultdict, deque
 from ultralytics import YOLO
+import process_images
+
+# Charger la configuration depuis config.json
+CONFIG_FILE = "config.json"
+
+def load_config():
+    """Charge la configuration depuis config.json."""
+    default_config = {
+        "detection": {
+            "confidence_threshold": 0.3,
+            "min_box_area": 1000,
+            "model_resolution": 1280,
+            "required_detections": 3
+        },
+        "ocr": {
+            "min_height": 400
+        },
+        "rtsp": {
+            "url": "rtsp://admin:teamprod123@192.168.70.101:554/h264Preview_01_main"
+        },
+        "folders": {
+            "output_folder": "img",
+            "processed_folder": "img_processed"
+        }
+    }
+    
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+                # Fusionner avec les valeurs par défaut pour les nouvelles clés
+                for key in default_config:
+                    if key not in config:
+                        config[key] = default_config[key]
+                return config
+        except Exception as e:
+            print(f"Erreur lors du chargement de config.json: {e}, utilisation des valeurs par défaut")
+    
+    return default_config
+
+config = load_config()
 
 # URL du flux RTSP
-RTSP_URL = "rtsp://admin:teamprod123@192.168.70.101:554/h264Preview_01_main"
+RTSP_URL = config["rtsp"]["url"]
 
 # Dossier de sortie pour les images de dossards détectés
-OUTPUT_FOLDER = "img"
+OUTPUT_FOLDER = config["folders"]["output_folder"]
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # Seuil de confiance YOLO
-CONFIDENCE_THRESHOLD = 0.3
+CONFIDENCE_THRESHOLD = config["detection"]["confidence_threshold"]
 
 # Aire minimale de la bounding box (en pixels) pour garantir une image lisible
-MIN_BOX_AREA = 1000
+MIN_BOX_AREA = config["detection"]["min_box_area"]
 
 # Résolution YOLO : 1280px pour meilleure précision sur petits dossards
-MODEL_RES = 1280
+MODEL_RES = config["detection"]["model_resolution"]
+
+# Nombre de détections requises pour valider un numéro
+REQUIRED_DETECTIONS = config["detection"]["required_detections"]
+
+# Stockage des détections : {numéro: deque des timestamps}
+detections = defaultdict(deque)
+# Numéros validés (détectés 3 fois) - pour éviter les doublons
+validated_numbers = set()
+# Lock pour la thread-safety
+detection_lock = threading.Lock()
 
 # Charger le modèle YOLO
 model = YOLO("best.pt")

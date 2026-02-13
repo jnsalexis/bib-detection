@@ -2,6 +2,7 @@ import os
 import re
 import cv2
 import numpy as np
+import json
 from PIL import Image
 import pytesseract
 from collections import defaultdict
@@ -12,14 +13,54 @@ from dotenv import load_dotenv
 # Charger les variables d'environnement depuis .env
 load_dotenv()
 
+# Charger la configuration depuis config.json
+CONFIG_FILE = "config.json"
+
+def load_config():
+    """Charge la configuration depuis config.json."""
+    default_config = {
+        "detection": {
+            "confidence_threshold": 0.3,
+            "min_box_area": 1000,
+            "model_resolution": 1280,
+            "required_detections": 3
+        },
+        "ocr": {
+            "min_height": 400
+        },
+        "rtsp": {
+            "url": "rtsp://admin:teamprod123@192.168.70.101:554/h264Preview_01_main"
+        },
+        "folders": {
+            "output_folder": "img",
+            "processed_folder": "img_processed"
+        }
+    }
+    
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+                # Fusionner avec les valeurs par défaut pour les nouvelles clés
+                for key in default_config:
+                    if key not in config:
+                        config[key] = default_config[key]
+                return config
+        except Exception as e:
+            print(f"Erreur lors du chargement de config.json: {e}, utilisation des valeurs par défaut")
+    
+    return default_config
+
+config = load_config()
+
 # Dossier contenant les images à analyser
-IMG_FOLDER = "img"
+IMG_FOLDER = config["folders"]["output_folder"]
 # Dossier pour enregistrer les images préprocessées (ce que l'OCR analyse)
-IMG_PROCESSED_FOLDER = "img_processed"
+IMG_PROCESSED_FOLDER = config["folders"]["processed_folder"]
 os.makedirs(IMG_PROCESSED_FOLDER, exist_ok=True)
 
 # Taille minimale (hauteur) pour que Tesseract lise bien les chiffres
-MIN_HEIGHT = 400
+MIN_HEIGHT = config["ocr"]["min_height"]
 
 # Configurations Tesseract pour les dossards (chiffres uniquement)
 CONFIG_PSM8 = "--psm 8 --oem 3 -c tessedit_char_whitelist=0123456789"
@@ -34,7 +75,7 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "dossards")
 
 # Nombre de détections requises pour envoyer à Supabase
-REQUIRED_DETECTIONS = 3
+REQUIRED_DETECTIONS = config["detection"]["required_detections"]
 
 # Client Supabase (initialisé à None, sera créé à la première utilisation)
 _supabase_client: Optional[Client] = None

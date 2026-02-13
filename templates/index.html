@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InLine - Detection Dossards</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-logo">
+                <img src="/static/img/logo.png" alt="InLine Logo">
+                <h1>InLine - Admin Panel</h1>
+            </div>
+            <div class="nav-buttons">
+                <a href="/config" class="btn btn-secondary">Configuration</a>
+                <button onclick="location.reload()" class="btn btn-primary">Actualiser</button>
+            </div>
+        </div>
+        
+        <!-- Section de contrôle des scripts -->
+        <div class="card scripts-control">
+            <h2>Contrôle des scripts</h2>
+            <div class="scripts-grid">
+                <div class="script-card">
+                    <h3>stream.py</h3>
+                    <p>Détection en temps réel depuis le flux RTSP</p>
+                    <div class="script-actions">
+                        <button id="btn-start-stream" onclick="startScript('stream')" class="btn btn-primary" style="flex: 1;">
+                            Démarrer
+                        </button>
+                        <button id="btn-stop-stream" onclick="stopScript('stream')" class="btn btn-secondary" style="flex: 1;">
+                            Arrêter
+                        </button>
+                    </div>
+                    <div id="status-stream" class="script-status"></div>
+                </div>
+                
+                <div class="script-card">
+                    <h3>process_images.py</h3>
+                    <p>OCR sur les images du dossier img/</p>
+                    <div class="script-actions">
+                        <button id="btn-start-process" onclick="startScript('process_images')" class="btn btn-primary" style="flex: 1;">
+                            Démarrer
+                        </button>
+                        <button id="btn-stop-process" onclick="stopScript('process_images')" class="btn btn-secondary" style="flex: 1;">
+                            Arrêter
+                        </button>
+                    </div>
+                    <div id="status-process_images" class="script-status"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Tableau des dossards détectés</h2>
+            
+            {% if detection_config %}
+            <div class="info-box">
+                <strong>Configuration de détection actuelle:</strong>
+                <div class="config-info">
+                    <div class="config-item">
+                        <label>Confidence Threshold</label>
+                        <span>{{ detection_config.detection.confidence_threshold }}</span>
+                    </div>
+                    <div class="config-item">
+                        <label>Min Box Area</label>
+                        <span>{{ detection_config.detection.min_box_area }} px</span>
+                    </div>
+                    <div class="config-item">
+                        <label>Model Resolution</label>
+                        <span>{{ detection_config.detection.model_resolution }} px</span>
+                    </div>
+                    <div class="config-item">
+                        <label>Required Detections</label>
+                        <span>{{ detection_config.detection.required_detections }}</span>
+                    </div>
+                    <div class="config-item">
+                        <label>OCR Min Height</label>
+                        <span>{{ detection_config.ocr.min_height }} px</span>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if error %}
+            <div class="error-message">
+                <strong>Erreur:</strong> {{ error }}
+            </div>
+            {% endif %}
+            
+            {% if dossards %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Numéro</th>
+                        <th>Date de création</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for dossard in dossards %}
+                    <tr>
+                        <td>{{ dossard.id }}</td>
+                        <td><strong>{{ dossard.number }}</strong></td>
+                        <td>{{ dossard.created_at[:19] if dossard.created_at else 'N/A' }}</td>
+                        <td>
+                            <button class="btn-danger" onclick="deleteDossard({{ dossard.id }})">Supprimer</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                </svg>
+                <h3>Aucun dossard détecté</h3>
+                <p>Les numéros détectés 3 fois apparaîtront ici.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div id="scripts-status-data" data-status='{{ processes_status|tojson if processes_status else {"stream": false, "process_images": false}|tojson }}' style="display: none;"></div>
+    <script src="/static/js/main.js"></script>
+    <script>
+        // Initialiser avec les données du serveur
+        const statusData = document.getElementById('scripts-status-data');
+        if (statusData && typeof initScriptsStatus === 'function') {
+            const initialStatus = JSON.parse(statusData.getAttribute('data-status'));
+            initScriptsStatus(initialStatus);
+        }
+    </script>
+</body>
+</html>
