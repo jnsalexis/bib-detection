@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import json
 import cv2
 import numpy as np
 from PIL import Image
@@ -13,10 +14,65 @@ from dotenv import load_dotenv
 # Charger les variables d'environnement depuis .env
 load_dotenv()
 
+# Fichier de configuration
+CONFIG_FILE = "config.json"
+
+
+def load_config():
+    """Charge la configuration depuis config.json."""
+    default_config = {
+        "detection": {
+            "confidence_threshold": 0.3,
+            "min_box_area": 1000,
+            "model_resolution": 1280,
+            "required_detections": 3
+        },
+        "ocr": {
+            "min_height": 600
+        },
+        "rtsp": {
+            "url": "rtsp://admin:teamprod123@192.168.70.101:554/h264Preview_01_main"
+        },
+        "folders": {
+            "output_folder": "img",
+            "processed_folder": "img_processed"
+        }
+    }
+    
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+                # Fusionner avec les valeurs par défaut pour les nouvelles clés
+                for key in default_config:
+                    if key not in config:
+                        config[key] = default_config[key]
+                    elif isinstance(default_config[key], dict):
+                        for subkey in default_config[key]:
+                            if subkey not in config[key]:
+                                config[key][subkey] = default_config[key][subkey]
+                return config
+        except Exception as e:
+            print(f"⚠️  Erreur lors du chargement de {CONFIG_FILE}: {e}")
+            print(f"   Utilisation de la configuration par défaut.")
+            return default_config
+    else:
+        print(f"⚠️  Fichier {CONFIG_FILE} introuvable. Utilisation de la configuration par défaut.")
+        return default_config
+
+
+# Charger la configuration
+config = load_config()
+
 # Dossier contenant les images préprocessées à analyser
-IMG_FOLDER = "img"
+IMG_FOLDER = config["folders"]["output_folder"]
 # Dossier pour déplacer les images traitées
-IMG_PROCESSED_FOLDER = "img_processed"
+IMG_PROCESSED_FOLDER = config["folders"]["processed_folder"]
+# Nombre de détections requises pour envoyer à Supabase
+REQUIRED_DETECTIONS = config["detection"]["required_detections"]
+
+# Créer les dossiers si nécessaires
+os.makedirs(IMG_FOLDER, exist_ok=True)
 os.makedirs(IMG_PROCESSED_FOLDER, exist_ok=True)
 
 # Configurations Tesseract pour les dossards (chiffres uniquement)
@@ -32,9 +88,6 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "dossards")
 
-# Nombre de détections requises pour envoyer à Supabase
-REQUIRED_DETECTIONS = 3
-
 # Client Supabase (initialisé à None, sera créé à la première utilisation)
 _supabase_client: Optional[Client] = None
 
@@ -44,6 +97,14 @@ detection_counts = defaultdict(int)
 sent_numbers = set()
 # Numéros pour lesquels l'envoi a échoué (pour éviter de réessayer indéfiniment)
 failed_numbers = set()
+
+print("="*60)
+print("CONFIGURATION CHARGÉE")
+print("="*60)
+print(f"Dossier à surveiller: {IMG_FOLDER}")
+print(f"Dossier de sortie: {IMG_PROCESSED_FOLDER}")
+print(f"Détections requises: {REQUIRED_DETECTIONS}")
+print("="*60 + "\n")
 
 
 def get_supabase_client() -> Optional[Client]:

@@ -3,27 +3,81 @@ import time
 import threading
 import cv2
 import numpy as np
+import json
 from datetime import datetime
 from ultralytics import YOLO
 
-# URL du flux RTSP
-RTSP_URL = "rtsp://admin:teamprod123@192.168.70.101:554/h264Preview_01_main"
+# Fichier de configuration
+CONFIG_FILE = "config.json"
 
-# Dossier de sortie pour les images de dossards détectés
-OUTPUT_FOLDER = "img"
+
+def load_config():
+    """Charge la configuration depuis config.json."""
+    default_config = {
+        "detection": {
+            "confidence_threshold": 0.3,
+            "min_box_area": 1000,
+            "model_resolution": 1280,
+            "required_detections": 3
+        },
+        "ocr": {
+            "min_height": 600
+        },
+        "rtsp": {
+            "url": "rtsp://admin:teamprod123@192.168.70.101:554/h264Preview_01_main"
+        },
+        "folders": {
+            "output_folder": "img",
+            "processed_folder": "img_processed"
+        }
+    }
+    
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+                # Fusionner avec les valeurs par défaut pour les nouvelles clés
+                for key in default_config:
+                    if key not in config:
+                        config[key] = default_config[key]
+                    elif isinstance(default_config[key], dict):
+                        for subkey in default_config[key]:
+                            if subkey not in config[key]:
+                                config[key][subkey] = default_config[key][subkey]
+                return config
+        except Exception as e:
+            print(f"⚠️  Erreur lors du chargement de {CONFIG_FILE}: {e}")
+            print(f"   Utilisation de la configuration par défaut.")
+            return default_config
+    else:
+        print(f"⚠️  Fichier {CONFIG_FILE} introuvable. Utilisation de la configuration par défaut.")
+        return default_config
+
+
+# Charger la configuration
+config = load_config()
+
+# Extraire les paramètres de la configuration
+RTSP_URL = config["rtsp"]["url"]
+OUTPUT_FOLDER = config["folders"]["output_folder"]
+CONFIDENCE_THRESHOLD = config["detection"]["confidence_threshold"]
+MIN_BOX_AREA = config["detection"]["min_box_area"]
+MODEL_RES = config["detection"]["model_resolution"]
+MIN_HEIGHT = config["ocr"]["min_height"]
+
+# Créer le dossier de sortie si nécessaire
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Seuil de confiance YOLO
-CONFIDENCE_THRESHOLD = 0.3
-
-# Aire minimale de la bounding box (en pixels) pour garantir une image lisible
-MIN_BOX_AREA = 1000
-
-# Résolution YOLO : 1280px pour meilleure précision sur petits dossards
-MODEL_RES = 1280
-
-# Taille minimale (hauteur) pour que l'OCR lise bien les chiffres
-MIN_HEIGHT = 600
+print("="*60)
+print("CONFIGURATION CHARGÉE")
+print("="*60)
+print(f"RTSP URL: {RTSP_URL}")
+print(f"Dossier de sortie: {OUTPUT_FOLDER}")
+print(f"Seuil de confiance: {CONFIDENCE_THRESHOLD}")
+print(f"Aire minimale de box: {MIN_BOX_AREA} px")
+print(f"Résolution du modèle: {MODEL_RES} px")
+print(f"Hauteur minimale OCR: {MIN_HEIGHT} px")
+print("="*60 + "\n")
 
 # Charger le modèle YOLO
 model = YOLO("best.pt")
