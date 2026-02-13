@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import cv2
+import numpy as np
 from datetime import datetime
 from ultralytics import YOLO
 
@@ -20,6 +21,9 @@ MIN_BOX_AREA = 1000
 
 # Résolution YOLO : 1280px pour meilleure précision sur petits dossards
 MODEL_RES = 1280
+
+# Taille minimale (hauteur) pour que l'OCR lise bien les chiffres
+MIN_HEIGHT = 600
 
 # Charger le modèle YOLO
 model = YOLO("best.pt")
@@ -88,10 +92,92 @@ class RTSPStreamReader:
 
 
 
-def preprocess_to_grayscale(cropped_bgr):
-    """Préprocesse le crop en noir et blanc (niveaux de gris)."""
-    gray = cv2.cvtColor(cropped_bgr, cv2.COLOR_BGR2GRAY)
-    return gray
+def deskew_image(img):
+    """
+    Corrige l'inclinaison de l'image pour améliorer la reconnaissance OCR.
+    """
+    coords = np.column_stack(np.where(img > 0))
+    if len(coords) == 0:
+        return img
+    
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        angle = -angle
+    
+    # Ne corriger que si l'angle est significatif (> 0.5 degrés)
+    if abs(angle) < 0.5:
+        return img
+    
+    (h, w) = img.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(img, M, (w, h), 
+                             flags=cv2.INTER_CUBIC, 
+                             borderMode=cv2.BORDER_REPLICATE)
+    return rotated
+
+
+def preprocess_for_ocr(cropped_bgr):
+    """
+    Prétraitement avancé optimisé pour la reconnaissance de numéros sur dossards :
+    - Niveaux de gris
+    - Amélioration du contraste (CLAHE)
+    - Redimensionnement agressif si trop petit
+    - Débruitage avancé
+    - Correction d'inclinaison (deskew)
+    - Binarisation Otsu (méthode la plus efficace)
+    - Opérations morphologiques
+    - Bordure blanche
+    - Inversion si nécessaire
+    
+    Retourne une image binarisée prête pour l'OCR.
+    """
+    if len(cropped_bgr.shape) == 3:
+        gray = cv2.cvtColor(cropped_bgr, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = cropped_bgr.copy()
+
+    # Redimensionnement si trop petit (upscale pour meilleure qualité)
+    h, w = gray.shape
+    if h < MIN_HEIGHT:
+        scale = MIN_HEIGHT / h
+        gray = cv2.resize(
+            gray, (int(w * scale), MIN_HEIGHT),
+            interpolation=cv2.INTER_CUBIC
+        )
+
+    # Amélioration du contraste local avec CLAHE
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+
+    # Débruitage avancé
+    gray = cv2.fastNlMeansDenoising(gray, h=10)
+
+    # Correction d'inclinaison
+    gray = deskew_image(gray)
+
+    # Binarisation Otsu avec blur
+    gray_blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, binary = cv2.threshold(
+        gray_blurred, 0, 255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+    
+    # Opérations morphologiques pour nettoyer le bruit
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    
+    # Tesseract attend du texte noir sur fond blanc
+    if np.mean(binary) < 127:
+        binary = 255 - binary
+    
+    # Ajouter une bordure blanche (Tesseract marche mieux)
+    binary = cv2.copyMakeBorder(binary, 10, 10, 10, 10, 
+                                cv2.BORDER_CONSTANT, value=255)
+
+    return binary
 
 
 def process_frame(frame):
@@ -156,14 +242,15 @@ def process_frame(frame):
             if cropped.size == 0:
                 continue
 
-            # Préprocesser en noir et blanc
-            preprocessed = preprocess_to_grayscale(cropped)
+            # Préprocesser avec le pipeline avancé (prêt pour OCR)
+            preprocessed = preprocess_for_ocr(cropped)
 
-            # Enregistrer avec compression JPEG qualité 100 (zéro perte)
+            # Enregistrer en PNG sans perte (important pour OCR)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(OUTPUT_FOLDER, f"dossard_{timestamp}_{int(box_area)}.jpg")
-            cv2.imwrite(filename, preprocessed, [cv2.IMWRITE_JPEG_QUALITY, 100])
-            print(f"Dossard enregistré: {filename} (aire: {box_area}, confiance: {confidence:.2f})")
+            microseconds = int(time.time() * 1000000) % 1000000
+            filename = os.path.join(OUTPUT_FOLDER, f"dossard_{timestamp}_{microseconds}.png")
+            cv2.imwrite(filename, preprocessed)
+            print(f"Dossard préprocessé enregistré: {filename} (aire: {box_area}, confiance: {confidence:.2f})")
 
     return frame_with_boxes
 
