@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import cv2
+import numpy as np
 import json
 from datetime import datetime
 from collections import defaultdict, deque
@@ -48,31 +49,77 @@ def load_config():
 
 config = load_config()
 
-# URL du flux RTSP
-RTSP_URL = config["rtsp"]["url"]
+# Fichier de configuration
+CONFIG_FILE = "config.json"
 
-# Dossier de sortie pour les images de dossards détectés
+
+def load_config():
+    """Charge la configuration depuis config.json."""
+    default_config = {
+        "detection": {
+            "confidence_threshold": 0.3,
+            "min_box_area": 1000,
+            "model_resolution": 1280,
+            "required_detections": 3
+        },
+        "ocr": {
+            "min_height": 600
+        },
+        "rtsp": {
+            "url": "rtsp://admin:teamprod123@192.168.70.101:554/h264Preview_01_main"
+        },
+        "folders": {
+            "output_folder": "img",
+            "processed_folder": "img_processed"
+        }
+    }
+    
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+                # Fusionner avec les valeurs par défaut pour les nouvelles clés
+                for key in default_config:
+                    if key not in config:
+                        config[key] = default_config[key]
+                    elif isinstance(default_config[key], dict):
+                        for subkey in default_config[key]:
+                            if subkey not in config[key]:
+                                config[key][subkey] = default_config[key][subkey]
+                return config
+        except Exception as e:
+            print(f"⚠️  Erreur lors du chargement de {CONFIG_FILE}: {e}")
+            print(f"   Utilisation de la configuration par défaut.")
+            return default_config
+    else:
+        print(f"⚠️  Fichier {CONFIG_FILE} introuvable. Utilisation de la configuration par défaut.")
+        return default_config
+
+
+# Charger la configuration
+config = load_config()
+
+# Extraire les paramètres de la configuration
+RTSP_URL = config["rtsp"]["url"]
 OUTPUT_FOLDER = config["folders"]["output_folder"]
+CONFIDENCE_THRESHOLD = config["detection"]["confidence_threshold"]
+MIN_BOX_AREA = config["detection"]["min_box_area"]
+MODEL_RES = config["detection"]["model_resolution"]
+MIN_HEIGHT = config["ocr"]["min_height"]
+
+# Créer le dossier de sortie si nécessaire
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Seuil de confiance YOLO
-CONFIDENCE_THRESHOLD = config["detection"]["confidence_threshold"]
-
-# Aire minimale de la bounding box (en pixels) pour garantir une image lisible
-MIN_BOX_AREA = config["detection"]["min_box_area"]
-
-# Résolution YOLO : 1280px pour meilleure précision sur petits dossards
-MODEL_RES = config["detection"]["model_resolution"]
-
-# Nombre de détections requises pour valider un numéro
-REQUIRED_DETECTIONS = config["detection"]["required_detections"]
-
-# Stockage des détections : {numéro: deque des timestamps}
-detections = defaultdict(deque)
-# Numéros validés (détectés 3 fois) - pour éviter les doublons
-validated_numbers = set()
-# Lock pour la thread-safety
-detection_lock = threading.Lock()
+print("="*60)
+print("CONFIGURATION CHARGÉE")
+print("="*60)
+print(f"RTSP URL: {RTSP_URL}")
+print(f"Dossier de sortie: {OUTPUT_FOLDER}")
+print(f"Seuil de confiance: {CONFIDENCE_THRESHOLD}")
+print(f"Aire minimale de box: {MIN_BOX_AREA} px")
+print(f"Résolution du modèle: {MODEL_RES} px")
+print(f"Hauteur minimale OCR: {MIN_HEIGHT} px")
+print("="*60 + "\n")
 
 # Charger le modèle YOLO
 model = YOLO("best.pt")
@@ -141,10 +188,92 @@ class RTSPStreamReader:
 
 
 
-def preprocess_to_grayscale(cropped_bgr):
-    """Préprocesse le crop en noir et blanc (niveaux de gris)."""
-    gray = cv2.cvtColor(cropped_bgr, cv2.COLOR_BGR2GRAY)
-    return gray
+def deskew_image(img):
+    """
+    Corrige l'inclinaison de l'image pour améliorer la reconnaissance OCR.
+    """
+    coords = np.column_stack(np.where(img > 0))
+    if len(coords) == 0:
+        return img
+    
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        angle = -angle
+    
+    # Ne corriger que si l'angle est significatif (> 0.5 degrés)
+    if abs(angle) < 0.5:
+        return img
+    
+    (h, w) = img.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(img, M, (w, h), 
+                             flags=cv2.INTER_CUBIC, 
+                             borderMode=cv2.BORDER_REPLICATE)
+    return rotated
+
+
+def preprocess_for_ocr(cropped_bgr):
+    """
+    Prétraitement avancé optimisé pour la reconnaissance de numéros sur dossards :
+    - Niveaux de gris
+    - Amélioration du contraste (CLAHE)
+    - Redimensionnement agressif si trop petit
+    - Débruitage avancé
+    - Correction d'inclinaison (deskew)
+    - Binarisation Otsu (méthode la plus efficace)
+    - Opérations morphologiques
+    - Bordure blanche
+    - Inversion si nécessaire
+    
+    Retourne une image binarisée prête pour l'OCR.
+    """
+    if len(cropped_bgr.shape) == 3:
+        gray = cv2.cvtColor(cropped_bgr, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = cropped_bgr.copy()
+
+    # Redimensionnement si trop petit (upscale pour meilleure qualité)
+    h, w = gray.shape
+    if h < MIN_HEIGHT:
+        scale = MIN_HEIGHT / h
+        gray = cv2.resize(
+            gray, (int(w * scale), MIN_HEIGHT),
+            interpolation=cv2.INTER_CUBIC
+        )
+
+    # Amélioration du contraste local avec CLAHE
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+
+    # Débruitage avancé
+    gray = cv2.fastNlMeansDenoising(gray, h=10)
+
+    # Correction d'inclinaison
+    gray = deskew_image(gray)
+
+    # Binarisation Otsu avec blur
+    gray_blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, binary = cv2.threshold(
+        gray_blurred, 0, 255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+    
+    # Opérations morphologiques pour nettoyer le bruit
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    
+    # Tesseract attend du texte noir sur fond blanc
+    if np.mean(binary) < 127:
+        binary = 255 - binary
+    
+    # Ajouter une bordure blanche (Tesseract marche mieux)
+    binary = cv2.copyMakeBorder(binary, 10, 10, 10, 10, 
+                                cv2.BORDER_CONSTANT, value=255)
+
+    return binary
 
 
 def process_frame(frame):
@@ -209,14 +338,15 @@ def process_frame(frame):
             if cropped.size == 0:
                 continue
 
-            # Préprocesser en noir et blanc
-            preprocessed = preprocess_to_grayscale(cropped)
+            # Préprocesser avec le pipeline avancé (prêt pour OCR)
+            preprocessed = preprocess_for_ocr(cropped)
 
-            # Enregistrer avec compression JPEG qualité 100 (zéro perte)
+            # Enregistrer en PNG sans perte (important pour OCR)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(OUTPUT_FOLDER, f"dossard_{timestamp}_{int(box_area)}.jpg")
-            cv2.imwrite(filename, preprocessed, [cv2.IMWRITE_JPEG_QUALITY, 100])
-            print(f"Dossard enregistré: {filename} (aire: {box_area}, confiance: {confidence:.2f})")
+            microseconds = int(time.time() * 1000000) % 1000000
+            filename = os.path.join(OUTPUT_FOLDER, f"dossard_{timestamp}_{microseconds}.png")
+            cv2.imwrite(filename, preprocessed)
+            print(f"Dossard préprocessé enregistré: {filename} (aire: {box_area}, confiance: {confidence:.2f})")
 
     return frame_with_boxes
 
