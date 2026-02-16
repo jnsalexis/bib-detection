@@ -3,3 +3,5 @@
 .env
 img/
 img_processed/
+__pycache__/
+.venv/
